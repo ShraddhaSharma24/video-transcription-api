@@ -4,10 +4,12 @@ services:
     env: python
     region: oregon
     buildCommand: pip install --upgrade pip setuptools wheel && pip install -r requirements.txt
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT --timeout-keep-alive 300 --limit-concurrency 10
     plan: starter
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
     healthCheckPath: /health
+    maxShutdownDelaySeconds: 30
+
 
