@@ -209,10 +209,23 @@ async def root():
 @app.get("/health")
 async def health():
     """Health check endpoint"""
+    import psutil
+    import platform
+    
+    memory = psutil.virtual_memory()
+    
     return {
         "status": "healthy",
         "model": "whisper-tiny",
-        "agent_loaded": agent is not None
+        "agent_loaded": agent is not None,
+        "system": {
+            "platform": platform.system(),
+            "python_version": platform.python_version(),
+            "cpu_count": psutil.cpu_count(),
+            "memory_total_mb": round(memory.total / (1024 * 1024), 2),
+            "memory_available_mb": round(memory.available / (1024 * 1024), 2),
+            "memory_percent": memory.percent
+        }
     }
 
 @app.post("/transcribe")
@@ -227,13 +240,28 @@ async def transcribe(
     if agent is None:
         raise HTTPException(status_code=503, detail="Agent not initialized")
 
+    temp_video_path = None
+    
     try:
+        # Validate file size (max 50MB to prevent timeouts)
+        content = await video.read()
+        file_size_mb = len(content) / (1024 * 1024)
+        
+        if file_size_mb > 50:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File too large: {file_size_mb:.2f}MB. Maximum size is 50MB."
+            )
+        
+        print(f"Processing video: {video.filename} ({file_size_mb:.2f}MB)")
+        
         # Save uploaded video
         temp_video_path = f"temp_{video.filename}"
         with open(temp_video_path, "wb") as f:
-            content = await video.read()
             f.write(content)
 
+        print("Starting transcription...")
+        
         # Process video
         result = agent.transcribe_video(
             temp_video_path,
@@ -243,18 +271,27 @@ async def transcribe(
             clips_dir="video_clips",
             frame_position=frame_position
         )
-
-        # Clean up temp video
-        if os.path.exists(temp_video_path):
-            os.remove(temp_video_path)
+        
+        print(f"Transcription complete: {len(result['segments'])} segments")
 
         return JSONResponse(content=result)
 
+    except HTTPException:
+        raise
     except Exception as e:
-        # Clean up on error
-        if os.path.exists(temp_video_path):
-            os.remove(temp_video_path)
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Error during transcription: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
+    
+    finally:
+        # Always clean up temp video
+        if temp_video_path and os.path.exists(temp_video_path):
+            try:
+                os.remove(temp_video_path)
+                print(f"Cleaned up {temp_video_path}")
+            except Exception as e:
+                print(f"Failed to clean up {temp_video_path}: {e}")
 
 @app.get("/audio/{filename}")
 async def get_audio_chunk(filename: str):
