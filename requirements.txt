@@ -11,5 +11,7 @@ numpy<2.0.0
 torch==2.1.0
 torchaudio==2.1.0
 setuptools<81
+psutil==6.1.0
+
 
 
