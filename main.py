@@ -44,26 +44,7 @@ class VideoTranscriptionAgent:
             print(f"Error extracting frame at {timestamp}s: {e}")
             return None
 
-    def extract_video_clip(self, video_path, start_time, end_time, output_path):
-        """Extract a video segment WITHOUT audio"""
-        try:
-            video = VideoFileClip(video_path)
-            clip = video.subclip(start_time, end_time)
-            clip_no_audio = clip.without_audio()
-            clip_no_audio.write_videofile(
-                output_path,
-                codec='libx264',
-                audio=False,
-                logger=None,
-                preset='ultrafast'
-            )
-            video.close()
-            clip.close()
-            clip_no_audio.close()
-            return output_path
-        except Exception as e:
-            print(f"Error extracting video clip from {start_time}s to {end_time}s: {e}")
-            return None
+
 
     def format_timestamp(self, seconds):
         """Convert seconds to HH:MM:SS.mmm format"""
@@ -84,15 +65,13 @@ class VideoTranscriptionAgent:
         return output_path
 
     def transcribe_video(self, video_path, language=None, output_dir="audio_chunks",
-                        frames_dir="video_frames", clips_dir="video_clips",
-                        frame_position="middle"):
+                        frames_dir="video_frames", frame_position="middle"):
         """
-        Transcribe video with timestamps, extract audio chunks, frames, and video clips
+        Transcribe video with timestamps, extract audio chunks and frames
         """
         # Create output directories
         os.makedirs(output_dir, exist_ok=True)
         os.makedirs(frames_dir, exist_ok=True)
-        os.makedirs(clips_dir, exist_ok=True)
 
         # Extract audio
         audio_path = self.extract_audio(video_path)
@@ -113,7 +92,7 @@ class VideoTranscriptionAgent:
             "segments": []
         }
 
-        print("Extracting audio chunks, video frames, and video clips...")
+        print("Extracting audio chunks and video frames...")
         for segment in result["segments"]:
             segment_id = segment["id"]
 
@@ -123,9 +102,6 @@ class VideoTranscriptionAgent:
             frame_filename = f"frame_{segment_id:04d}.jpg"
             frame_path = os.path.join(frames_dir, frame_filename)
 
-            clip_filename = f"clip_{segment_id:04d}.mp4"
-            clip_path = os.path.join(clips_dir, clip_filename)
-
             # Calculate frame timestamp
             if frame_position == "start":
                 frame_timestamp = segment["start"]
@@ -134,10 +110,9 @@ class VideoTranscriptionAgent:
             else:
                 frame_timestamp = (segment["start"] + segment["end"]) / 2
 
-            # Extract components
+            # Extract audio chunk and frame
             self.extract_audio_chunk(audio_path, segment["start"], segment["end"], chunk_path)
             frame_extracted = self.extract_frame(video_path, frame_timestamp, frame_path)
-            clip_extracted = self.extract_video_clip(video_path, segment["start"], segment["end"], clip_path)
 
             formatted_segment = {
                 "id": segment["id"],
@@ -152,9 +127,7 @@ class VideoTranscriptionAgent:
                 "frame_file": frame_filename,
                 "frame_path": frame_path if frame_extracted else None,
                 "frame_timestamp": self.format_timestamp(frame_timestamp),
-                "frame_timestamp_seconds": frame_timestamp,
-                "video_clip_file": clip_filename,
-                "video_clip_path": clip_path if clip_extracted else None
+                "frame_timestamp_seconds": frame_timestamp
             }
 
             formatted_result["segments"].append(formatted_segment)
@@ -170,7 +143,7 @@ class VideoTranscriptionAgent:
 app = FastAPI(
     title="Video Transcription API",
     version="3.0.0",
-    description="API for video transcription with audio chunks, frames, and clips extraction"
+    description="API for video transcription with audio chunks and frame extraction"
 )
 
 # Add CORS middleware
@@ -194,15 +167,14 @@ async def startup_event():
 async def root():
     """Root endpoint"""
     return {
-        "message": "Video Transcription API with Frame & Clip Extraction",
+        "message": "Video Transcription API with Audio Chunks & Frame Extraction",
         "version": "3.0.0",
         "status": "running",
         "endpoints": {
             "health": "/health",
             "transcribe": "/transcribe (POST)",
             "audio": "/audio/{filename} (GET)",
-            "frame": "/frame/{filename} (GET)",
-            "clip": "/clip/{filename} (GET)"
+            "frame": "/frame/{filename} (GET)"
         }
     }
 
@@ -268,7 +240,6 @@ async def transcribe(
             language=language,
             output_dir="audio_chunks",
             frames_dir="video_frames",
-            clips_dir="video_clips",
             frame_position=frame_position
         )
         
@@ -309,15 +280,8 @@ async def get_frame(filename: str):
         raise HTTPException(status_code=404, detail="Frame file not found")
     return FileResponse(frame_path, media_type="image/jpeg", filename=filename)
 
-@app.get("/clip/{filename}")
-async def get_video_clip(filename: str):
-    """Download a specific video clip (without audio)"""
-    clip_path = os.path.join("video_clips", filename)
-    if not os.path.exists(clip_path):
-        raise HTTPException(status_code=404, detail="Video clip not found")
-    return FileResponse(clip_path, media_type="video/mp4", filename=filename)
-
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
 
